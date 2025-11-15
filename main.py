@@ -19,8 +19,7 @@ import datetime
 np.random.seed(42)
 tf.random.set_seed(42)
 
-genres = ['blues', 'classical', 'country', 'disco', 'hiphop',
-          'jazz', 'metal', 'pop', 'reggae', 'rock']
+drone_types = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
 
 
 # ============ DATA AUGMENTATION TOUJOURS (pas aléatoire) ============
@@ -45,18 +44,18 @@ def augment_audio(mel_db):
 
 """
 conventions du ML X = input, y = output
-X est l'array qui represente les chansons
-y est le genre prédit
+X est l'array qui represente les enregistrements audio des drones
+y est le type de drone prédit
 """
 X, y = [], []
 
 print("Chargement des données...")
-for g in genres:
-    folder = f"genres/{g}"
+for drone_type in drone_types:
+    folder = f"Training_data/{drone_type}"
     for filename in os.listdir(folder):
-        song_path = os.path.join(folder, filename)
+        audio_path = os.path.join(folder, filename)
 
-        y_audio, sr = librosa.load(song_path, duration=30)
+        y_audio, sr = librosa.load(audio_path, duration=30)
         # creation spectrogramme
         mel = librosa.feature.melspectrogram(y=y_audio, sr=sr, n_mels=128, n_fft=2048, hop_length=512)
         # Convertie en decibel
@@ -73,7 +72,7 @@ for g in genres:
         augmented_samples = augment_audio(mel_db)
         for aug_mel in augmented_samples:
             X.append(aug_mel)
-            y.append(genres.index(g))
+            y.append(drone_types.index(drone_type))
 
 X = np.array(X)
 y = to_categorical(np.array(y))
@@ -112,7 +111,7 @@ model = Sequential([
     Dense(128, activation='relu'),
     Dropout(0.7),  # Augmenté 0.6 → 0.7
 
-    Dense(len(genres), activation='softmax')
+    Dense(len(drone_types), activation='softmax')
 ])
 
 model.compile(
@@ -188,12 +187,12 @@ print("X shape:", X.shape)
 
 mel_db = X[0]
 label_index = y[0]
-genre_name = genres[label_index]
+drone_type_name = drone_types[label_index]
 
 plt.figure(figsize=(10, 4))
 librosa.display.specshow(mel_db, x_axis='time', y_axis='mel', sr=22050, cmap='magma')
 plt.colorbar(format='%+2.0f dB')
-plt.title(f"Genre: {genre_name}")
+plt.title(f"Drone Type: {drone_type_name}")
 plt.tight_layout()
 plt.show()
 """
