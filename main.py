@@ -24,22 +24,32 @@ drone_types = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
 
 # ============ DATA AUGMENTATION TOUJOURS (pas aléatoire) ============
 def augment_audio(mel_db):
-    """Augmente TOUJOURS - pas de random!"""
+    """Augmente sans changer le pitch (important pour identification!)"""
     augmented = [mel_db]  # Original
     
-    # Bruit léger (TOUJOURS)
-    noise = np.random.normal(0, 0.005, mel_db.shape)
-    augmented.append(mel_db + noise)
+    # Bruit léger - 3 versions (simule conditions d'enregistrement différentes)
+    noise1 = np.random.normal(0, 0.002, mel_db.shape)
+    augmented.append(mel_db + noise1)
     
-    # Time shift (TOUJOURS)
-    shift = np.random.randint(-40, 40)
-    augmented.append(np.roll(mel_db, shift, axis=1))
+    noise2 = np.random.normal(0, 0.005, mel_db.shape)
+    augmented.append(mel_db + noise2)
     
-    # Pitch shift (TOUJOURS)
-    pitch = np.random.uniform(0.95, 1.05)
-    augmented.append(mel_db * pitch)
+    noise3 = np.random.normal(0, 0.010, mel_db.shape)
+    augmented.append(mel_db + noise3)
     
-    return augmented  # TOUJOURS 4 versions (1 original + 3 augmentées)
+    # Time shift - 3 versions (simule drone qui passe à différents moments)
+    shift1 = np.random.randint(-20, 20)
+    augmented.append(np.roll(mel_db, shift1, axis=1))
+    
+    shift2 = np.random.randint(-40, 40)
+    augmented.append(np.roll(mel_db, shift2, axis=1))
+    
+    shift3 = np.random.randint(-60, 60)
+    augmented.append(np.roll(mel_db, shift3, axis=1))
+    
+    # PAS de pitch shift - préserve la signature fréquentielle du drone!
+    
+    return augmented  # 7 versions (1 original + 6 augmentées)
 
 
 """
@@ -55,19 +65,22 @@ for drone_type in drone_types:
     for filename in os.listdir(folder):
         audio_path = os.path.join(folder, filename)
 
-        y_audio, sr = librosa.load(audio_path, duration=30)
+        y_audio, sr = librosa.load(audio_path, duration=10)
         # creation spectrogramme
         mel = librosa.feature.melspectrogram(y=y_audio, sr=sr, n_mels=128, n_fft=2048, hop_length=512)
         # Convertie en decibel
         mel_db = librosa.power_to_db(mel, ref=np.max)
 
-        # pour consitent data
-        max_len = 660
+        # pour consitent data (10s @ 22050Hz -> ~215 frames)
+        max_len = 215
         if mel_db.shape[1] < max_len:
             pad_width = max_len - mel_db.shape[1]
             mel_db = np.pad(mel_db, pad_width=((0, 0), (0, pad_width)), mode='constant')
         else:
             mel_db = mel_db[:, :max_len]
+        
+        # Normalise CHAQUE spectrogram individuellement AVANT augmentation
+        mel_db = (mel_db - mel_db.mean()) / (mel_db.std() + 1e-8)
 
         augmented_samples = augment_audio(mel_db)
         for aug_mel in augmented_samples:
@@ -77,10 +90,9 @@ for drone_type in drone_types:
 X = np.array(X)
 y = to_categorical(np.array(y))
 
-print(f"Dataset total: {len(X)} échantillons (1000 originaux × 3 = 3000)")
+print(f"Dataset total: {len(X)} échantillons")
 
-# Normaliser les données entre 0 et 1 (important!)
-X = (X - X.min()) / (X.max() - X.min())
+# PAS de normalisation globale - déjà normalisé individuellement!
 
 X = X[..., np.newaxis] # ajout d'un 4e axe
 # 20% des data va dans test le reste on train avec
@@ -88,34 +100,27 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle
 
 
 model = Sequential([
-    Input(shape=(128, 660, 1)),
+    Input(shape=(128, 215, 1)),
 
-    # 3 Conv layers seulement (pas 4!)
-    Conv2D(32, (3, 3), activation='relu', padding='same'),
+    # Ultra-simplifié pour très petit dataset
+    Conv2D(8, (3, 3), activation='relu', padding='same'),
     MaxPooling2D((2, 2)),
-    Dropout(0.5),  # Augmenté 0.4 → 0.5
+    Dropout(0.2),
 
-    Conv2D(64, (3, 3), activation='relu', padding='same'),
+    Conv2D(16, (3, 3), activation='relu', padding='same'),
     MaxPooling2D((2, 2)),
-    Dropout(0.5),
-
-    Conv2D(128, (3, 3), activation='relu', padding='same'),
-    MaxPooling2D((2, 2)),
-    Dropout(0.5),
-
-    # Retiré Conv2D(256) - trop complexe!
+    Dropout(0.2),
 
     Flatten(),
     
-    # 1 Dense seulement (pas 2!)
-    Dense(128, activation='relu'),
-    Dropout(0.7),  # Augmenté 0.6 → 0.7
+    Dense(16, activation='relu'),
+    Dropout(0.3),
 
     Dense(len(drone_types), activation='softmax')
 ])
 
 model.compile(
-    optimizer='adam',
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
     loss='categorical_crossentropy',
     metrics=['accuracy']
 )
@@ -123,16 +128,16 @@ model.compile(
 print("Nombre d'échantillons:", len(X_train), "train,", len(X_test), "test")
 print("Shape X_train:", X_train.shape)
 print("Shape y_train:", y_train.shape)
-print(f"Batches par epoch: {len(X_train) // 32}")
+print(f"Batches par epoch: {len(X_train) // 16}")
 
 # stop quand le model n'apprend plus
 # patience = nombre d'epochs à attendre sans amélioration avant d'arrêter
-early_stop = EarlyStopping(monitor='val_loss', patience=12, restore_best_weights=True, verbose=1)
+early_stop = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True, verbose=1)
 
 reduce_lr = ReduceLROnPlateau(
     monitor='val_loss',
     factor=0.5,
-    patience=5,
+    patience=8,
     min_lr=1e-7,
     verbose=1
 )
@@ -140,8 +145,8 @@ reduce_lr = ReduceLROnPlateau(
 history = model.fit(
     X_train, y_train,
     validation_data=(X_test, y_test),
-    epochs=50,
-    batch_size=32,
+    epochs=150,
+    batch_size=16,  # Augmenté pour plus de stabilité
     callbacks=[early_stop, reduce_lr],
     verbose=1
 )
@@ -152,6 +157,7 @@ print(f"TEST ACCURACY: {test_acc*100:.2f}%")
 print(f"{'='*60}")
 
 # FIX: Remplace : par - dans le nom du fichier
+os.makedirs('models', exist_ok=True)
 model.save(f'models/{datetime.datetime.now().strftime("%m-%d_%H-%M-%S")}.keras')
 
 
