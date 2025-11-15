@@ -11,7 +11,7 @@ from sklearn.model_selection import train_test_split
 from keras.utils import to_categorical
 import tensorflow as tf
 from keras.models import Sequential
-from keras.layers import Input, Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from keras.layers import Input, Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
 from keras.callbacks import EarlyStopping, ReduceLROnPlateau
 import datetime
 
@@ -102,25 +102,32 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle
 model = Sequential([
     Input(shape=(128, 215, 1)),
 
-    # Ultra-simplifié pour très petit dataset
-    Conv2D(8, (3, 3), activation='relu', padding='same'),
+    # Première couche - extraction features basiques
+    Conv2D(32, (3, 3), activation='relu', padding='same'),
+    BatchNormalization(),
     MaxPooling2D((2, 2)),
-    Dropout(0.2),
+    Dropout(0.4),  # Augmenté pour réduire overfitting
 
-    Conv2D(16, (3, 3), activation='relu', padding='same'),
+    # Deuxième couche - features plus complexes
+    Conv2D(64, (3, 3), activation='relu', padding='same'),
+    BatchNormalization(),
     MaxPooling2D((2, 2)),
-    Dropout(0.2),
+    Dropout(0.45),
+
+    # Pas de 3e couche Conv - trop complexe pour ce dataset
 
     Flatten(),
     
-    Dense(16, activation='relu'),
-    Dropout(0.3),
+    # Dense layer pour classification
+    Dense(64, activation='relu'),
+    BatchNormalization(),
+    Dropout(0.7),
 
     Dense(len(drone_types), activation='softmax')
 ])
 
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=0.0003),
     loss='categorical_crossentropy',
     metrics=['accuracy']
 )
@@ -128,16 +135,16 @@ model.compile(
 print("Nombre d'échantillons:", len(X_train), "train,", len(X_test), "test")
 print("Shape X_train:", X_train.shape)
 print("Shape y_train:", y_train.shape)
-print(f"Batches par epoch: {len(X_train) // 16}")
+print(f"Batches par epoch: {len(X_train) // 32}")
 
 # stop quand le model n'apprend plus
 # patience = nombre d'epochs à attendre sans amélioration avant d'arrêter
-early_stop = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True, verbose=1)
+early_stop = EarlyStopping(monitor='val_loss', patience=30, restore_best_weights=True, verbose=1)
 
 reduce_lr = ReduceLROnPlateau(
     monitor='val_loss',
     factor=0.5,
-    patience=8,
+    patience=10,
     min_lr=1e-7,
     verbose=1
 )
@@ -145,8 +152,8 @@ reduce_lr = ReduceLROnPlateau(
 history = model.fit(
     X_train, y_train,
     validation_data=(X_test, y_test),
-    epochs=150,
-    batch_size=16,  # Augmenté pour plus de stabilité
+    epochs=200,
+    batch_size=32,  # Batch plus grand avec BatchNorm
     callbacks=[early_stop, reduce_lr],
     verbose=1
 )
