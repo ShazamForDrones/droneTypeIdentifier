@@ -8,13 +8,31 @@ import librosa
 import numpy as np
 import time
 
-genres = ['blues', 'classical', 'country', 'disco', 'hiphop',
-          'jazz', 'metal', 'pop', 'reggae', 'rock']
+# =================== CONSTANTES (MUST MATCH TRAINING) ===================
+SR = 22050          # sample rate
+DURATION = 3.0      # 3 secondes par extrait (MUST BE 3.0 to match training!)
+N_MELS = 64         # nombre de mels
+HOP_LENGTH = 1024   # hop length for mel spectrogram
+MAX_LEN = 200       # longueur temporelle max après mels
 
-# 1. CHARGER LE MODÈLE
+genres = ['unknown', 'yes_drone']  # ordre des classes (MUST MATCH TRAINING)
+
+# 1. CHARGER LE MODÈLE ET PARAMÈTRES DE NORMALISATION
 print("Chargement du modèle...")
-model = keras.saving.load_model("models/genre_classifier_11-09_20-08-10.keras")
+model = keras.saving.load_model(r"models\binary_drone_classifier_11-15_02-19-25.keras")
 print("✅ Modèle chargé!")
+
+# Try to load normalization parameters
+try:
+    norm_params = np.load(r"models\normalization_params_11-15_02-19-25.npy", allow_pickle=True).item()
+    TRAIN_MIN = norm_params['train_min']
+    TRAIN_MAX = norm_params['train_max']
+    print(f"✅ Paramètres de normalisation chargés: min={TRAIN_MIN:.4f}, max={TRAIN_MAX:.4f}")
+except FileNotFoundError:
+    print("⚠️  Fichier de normalisation introuvable. Utilisation de la normalisation par échantillon.")
+    print("   Pour de meilleurs résultats, sauvegardez train_min et train_max lors de l'entraînement.")
+    TRAIN_MIN = None
+    TRAIN_MAX = None
 
 
 def analyse(song_path):
@@ -28,24 +46,39 @@ def analyse(song_path):
     # Si chanson > 2 minutes, commence à 60s
     duration = librosa.get_duration(path=song_path)
     offset = 60 if duration > 120 else 0
-    y_audio, sr = librosa.load(song_path, duration=30, offset=offset)
+    y_audio, sr = librosa.load(song_path, duration=DURATION, offset=offset, sr=SR, mono=True)
 
-    mel = librosa.feature.melspectrogram(y=y_audio, sr=sr, n_mels=128, n_fft=2048, hop_length=512)
+    # Melspectrogramme (MUST MATCH TRAINING PARAMETERS)
+    mel = librosa.feature.melspectrogram(
+        y=y_audio,
+        sr=sr,
+        n_mels=N_MELS,
+        n_fft=2048,
+        hop_length=HOP_LENGTH
+    )
     mel_db = librosa.power_to_db(mel, ref=np.max)
 
-    max_len = 660
-    if mel_db.shape[1] < max_len:
-        pad_width = max_len - mel_db.shape[1]
+    # Padding / tronquage sur l'axe temps (MUST MATCH TRAINING)
+    if mel_db.shape[1] < MAX_LEN:
+        pad_width = MAX_LEN - mel_db.shape[1]
         mel_db = np.pad(mel_db, pad_width=((0, 0), (0, pad_width)), mode='constant')
     else:
-        mel_db = mel_db[:, :max_len]
+        mel_db = mel_db[:, :MAX_LEN]
 
-
-    mel_db = (mel_db - mel_db.min()) / (mel_db.max() - mel_db.min())
-    mel_db = mel_db[np.newaxis, ..., np.newaxis]
+    # Normalisation (MUST MATCH TRAINING EXACTLY)
+    if TRAIN_MIN is not None and TRAIN_MAX is not None:
+        # Use saved global normalization parameters from training
+        denom = (TRAIN_MAX - TRAIN_MIN + 1e-8)
+        mel_db = (mel_db - TRAIN_MIN) / denom
+    else:
+        # Fallback: per-sample normalization (less accurate but works)
+        mel_db = (mel_db - mel_db.min()) / (mel_db.max() - mel_db.min() + 1e-8)
+    
+    mel_db = mel_db[np.newaxis, ..., np.newaxis]  # Shape: (1, N_MELS, MAX_LEN, 1)
 
 
     prediction = model.predict(mel_db, verbose=0)
+
 
     genre_index = np.argmax(prediction)
     genre_name = genres[genre_index]
