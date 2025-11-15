@@ -61,7 +61,7 @@ X, y = [], []
 
 print("Chargement des données...")
 for drone_type in drone_types:
-    folder = f"Training_data/drone_{drone_type}"
+    folder = f"audio_cutter_output/{drone_type}_drone_cut"
     for filename in os.listdir(folder):
         audio_path = os.path.join(folder, filename)
 
@@ -106,7 +106,7 @@ model = Sequential([
     Conv2D(32, (3, 3), activation='relu', padding='same'),
     BatchNormalization(),
     MaxPooling2D((2, 2)),
-    Dropout(0.4),  # Augmenté pour réduire overfitting
+    Dropout(0.45),  # Augmenté pour réduire overfitting
 
     # Deuxième couche - features plus complexes
     Conv2D(64, (3, 3), activation='relu', padding='same'),
