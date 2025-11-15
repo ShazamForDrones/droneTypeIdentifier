@@ -51,7 +51,7 @@ X, y = [], []
 
 print("Chargement des données...")
 for drone_type in drone_types:
-    folder = f"Training_data/{drone_type}"
+    folder = f"Training_data/drone_{drone_type}"
     for filename in os.listdir(folder):
         audio_path = os.path.join(folder, filename)
 
